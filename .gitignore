@@ -79,5 +79,4 @@ yarn.lock
 .env.*.local
 
 # Data directory (SQLite storage)
-data/
 !data/.gitkeep
