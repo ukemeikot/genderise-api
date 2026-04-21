@@ -8,20 +8,19 @@ public class ProfileConfiguration : IEntityTypeConfiguration<Profile>
 {
     public void Configure(EntityTypeBuilder<Profile> builder)
     {
+        builder.ToTable("Profiles");
+
         builder.HasKey(p => p.Id);
 
         builder.Property(p => p.Id)
-            .HasDefaultValueSql("randomblob(16)");
+            .ValueGeneratedNever();
 
         builder.Property(p => p.Name)
             .IsRequired()
-            .HasMaxLength(255);
+            .HasMaxLength(255)
+            .UseCollation("NOCASE");
 
-        builder.Property(p => p.NormalizedName)
-            .IsRequired()
-            .HasMaxLength(255);
-
-        builder.HasIndex(p => p.NormalizedName)
+        builder.HasIndex(p => p.Name)
             .IsUnique();
 
         builder.Property(p => p.Gender)
@@ -29,10 +28,7 @@ public class ProfileConfiguration : IEntityTypeConfiguration<Profile>
             .HasMaxLength(50);
 
         builder.Property(p => p.GenderProbability)
-            .HasPrecision(18, 4);
-
-        builder.Property(p => p.SampleSize)
-            .IsRequired();
+            .HasColumnType("REAL");
 
         builder.Property(p => p.Age)
             .IsRequired();
@@ -43,12 +39,23 @@ public class ProfileConfiguration : IEntityTypeConfiguration<Profile>
 
         builder.Property(p => p.CountryId)
             .IsRequired()
-            .HasMaxLength(10);
+            .HasMaxLength(2);
+
+        builder.Property(p => p.CountryName)
+            .IsRequired()
+            .HasMaxLength(255);
 
         builder.Property(p => p.CountryProbability)
-            .HasPrecision(18, 4);
+            .HasColumnType("REAL");
 
         builder.Property(p => p.CreatedAt)
-            .IsRequired();
+            .IsRequired()
+            .HasColumnType("TEXT");
+
+        builder.HasIndex(p => p.Gender);
+        builder.HasIndex(p => p.AgeGroup);
+        builder.HasIndex(p => p.CountryId);
+        builder.HasIndex(p => p.Age);
+        builder.HasIndex(p => p.CreatedAt);
     }
 }

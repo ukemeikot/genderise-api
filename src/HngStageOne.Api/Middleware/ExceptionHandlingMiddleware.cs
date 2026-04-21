@@ -36,9 +36,19 @@ public class ExceptionHandlingMiddleware
 
         switch (exception)
         {
-            case ArgumentException:
+            case MissingOrEmptyParameterException missingParameterException:
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                message = "Missing or invalid name provided";
+                message = missingParameterException.Message;
+                break;
+
+            case UnableToInterpretQueryException unableToInterpretQueryException:
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                message = unableToInterpretQueryException.Message;
+                break;
+
+            case InvalidQueryParametersException invalidQueryParametersException:
+                context.Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
+                message = invalidQueryParametersException.Message;
                 break;
 
             case ProfileNotFoundException:

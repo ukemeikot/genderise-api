@@ -14,10 +14,7 @@ public class ProfileDetailResponse
     public required string Gender { get; set; }
 
     [JsonPropertyName("gender_probability")]
-    public required decimal GenderProbability { get; set; }
-
-    [JsonPropertyName("sample_size")]
-    public required int SampleSize { get; set; }
+    public required double GenderProbability { get; set; }
 
     [JsonPropertyName("age")]
     public required int Age { get; set; }
@@ -28,8 +25,11 @@ public class ProfileDetailResponse
     [JsonPropertyName("country_id")]
     public required string CountryId { get; set; }
 
+    [JsonPropertyName("country_name")]
+    public required string CountryName { get; set; }
+
     [JsonPropertyName("country_probability")]
-    public required decimal CountryProbability { get; set; }
+    public required double CountryProbability { get; set; }
 
     [JsonPropertyName("created_at")]
     public required string CreatedAt { get; set; }

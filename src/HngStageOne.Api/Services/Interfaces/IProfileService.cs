@@ -5,8 +5,9 @@ namespace HngStageOne.Api.Services.Interfaces;
 
 public interface IProfileService
 {
-    Task<SingleProfileResponse> CreateProfileAsync(CreateProfileRequest request);
-    Task<SingleProfileResponse> GetProfileByIdAsync(Guid id);
-    Task<ProfilesListResponse> GetAllProfilesAsync(string? gender = null, string? countryId = null, string? ageGroup = null);
-    Task DeleteProfileAsync(Guid id);
+    Task<SingleProfileResponse> CreateProfileAsync(CreateProfileRequest request, CancellationToken cancellationToken = default);
+    Task<SingleProfileResponse> GetProfileByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<ProfilesListResponse> GetProfilesAsync(ProfileQueryRequest request, CancellationToken cancellationToken = default);
+    Task<ProfilesListResponse> SearchProfilesAsync(ProfileSearchRequest request, CancellationToken cancellationToken = default);
+    Task DeleteProfileAsync(Guid id, CancellationToken cancellationToken = default);
 }

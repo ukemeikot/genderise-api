@@ -6,6 +6,7 @@ using HngStageOne.Api.Repositories.Implementations;
 using HngStageOne.Api.Repositories.Interfaces;
 using HngStageOne.Api.Services;
 using HngStageOne.Api.Services.Interfaces;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
@@ -26,14 +27,19 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.PropertyNamingPolicy = null;
     });
 
+builder.Services.Configure<ApiBehaviorOptions>(options =>
+{
+    options.SuppressModelStateInvalidFilter = true;
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new OpenApiInfo
     {
-        Title = "HngStageOne API",
+        Title = "HNG Stage 2 Queryable Intelligence API",
         Version = "v1",
-        Description = "HNG Stage 1 Backend Assessment API - Profile Classification Service"
+        Description = "Queryable demographic intelligence API with advanced filters, pagination, sorting, and natural language search."
     });
 });
 
@@ -42,6 +48,9 @@ builder.Services.AddScoped<IProfileRepository, ProfileRepository>();
 
 // Register Services
 builder.Services.AddScoped<IProfileService, ProfileService>();
+builder.Services.AddScoped<IProfileQueryValidator, ProfileQueryValidator>();
+builder.Services.AddScoped<INaturalLanguageProfileQueryParser, NaturalLanguageProfileQueryParser>();
+builder.Services.AddScoped<IProfileSeedService, ProfileSeedService>();
 
 // Register HTTP Clients
 builder.Services.AddHttpClient<IGenderizeClient, GenderizeClient>();
@@ -75,11 +84,25 @@ using (var scope = app.Services.CreateScope())
     {
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         dbContext.Database.Migrate();
+
+        var seedLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        var seedService = scope.ServiceProvider.GetRequiredService<IProfileSeedService>();
+        var seedPath = FindSeedFilePath(app.Environment.ContentRootPath);
+
+        if (seedPath is not null)
+        {
+            var insertedCount = await seedService.SeedAsync(seedPath);
+            seedLogger.LogInformation("Seeded {InsertedCount} profiles from {SeedPath}", insertedCount, seedPath);
+        }
+        else
+        {
+            seedLogger.LogWarning("Seed file not found from content root {ContentRootPath}", app.Environment.ContentRootPath);
+        }
     }
     catch (Exception ex)
     {
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "Database migration failed");
+        logger.LogError(ex, "Database initialization failed");
         if (app.Environment.IsProduction())
         {
             throw;
@@ -96,11 +119,6 @@ if (app.Environment.IsDevelopment())
         options.SwaggerEndpoint("/swagger/v1/swagger.json", "HngStageOne API v1");
         options.RoutePrefix = "swagger";
     });
-}
-else
-{
-    // In production, disable Swagger
-    app.UseExceptionHandler("/error");
 }
 
 // Use CORS
@@ -124,3 +142,26 @@ app.MapGet("/", () => Results.Ok(new
 }));
 
 await app.RunAsync();
+
+static string? FindSeedFilePath(string contentRootPath)
+{
+    var directoriesToCheck = new[]
+    {
+        contentRootPath,
+        Directory.GetParent(contentRootPath)?.FullName,
+        Directory.GetParent(Directory.GetParent(contentRootPath ?? string.Empty)?.FullName ?? string.Empty)?.FullName
+    }
+    .Where(path => !string.IsNullOrWhiteSpace(path))
+    .Distinct(StringComparer.OrdinalIgnoreCase);
+
+    foreach (var directory in directoriesToCheck)
+    {
+        var candidatePath = Path.Combine(directory!, "seed_profiles.json");
+        if (File.Exists(candidatePath))
+        {
+            return candidatePath;
+        }
+    }
+
+    return null;
+}

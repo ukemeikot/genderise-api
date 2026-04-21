@@ -17,38 +17,37 @@ public class ProfilesController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> CreateProfile([FromBody] CreateProfileRequest request)
+    public async Task<IActionResult> CreateProfile([FromBody] CreateProfileRequest request, CancellationToken cancellationToken)
     {
-        if (request == null)
-        {
-            return BadRequest(new { status = "error", message = "Missing or invalid name provided" });
-        }
-
-        var result = await _profileService.CreateProfileAsync(request);
+        var result = await _profileService.CreateProfileAsync(request, cancellationToken);
         return CreatedAtAction(nameof(GetProfile), new { id = result.Data.Id }, result);
     }
 
     [HttpGet("{id}")]
-    public async Task<IActionResult> GetProfile(Guid id)
+    public async Task<IActionResult> GetProfile(Guid id, CancellationToken cancellationToken)
     {
-        var result = await _profileService.GetProfileByIdAsync(id);
+        var result = await _profileService.GetProfileByIdAsync(id, cancellationToken);
         return Ok(result);
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetAllProfiles(
-        [FromQuery] string? gender,
-        [FromQuery] string? country_id,
-        [FromQuery] string? age_group)
+    public async Task<IActionResult> GetAllProfiles([FromQuery] ProfileQueryRequest request, CancellationToken cancellationToken)
     {
-        var result = await _profileService.GetAllProfilesAsync(gender, country_id, age_group);
+        var result = await _profileService.GetProfilesAsync(request, cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("search")]
+    public async Task<IActionResult> SearchProfiles([FromQuery] ProfileSearchRequest request, CancellationToken cancellationToken)
+    {
+        var result = await _profileService.SearchProfilesAsync(request, cancellationToken);
         return Ok(result);
     }
 
     [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteProfile(Guid id)
+    public async Task<IActionResult> DeleteProfile(Guid id, CancellationToken cancellationToken)
     {
-        await _profileService.DeleteProfileAsync(id);
+        await _profileService.DeleteProfileAsync(id, cancellationToken);
         return NoContent();
     }
 }

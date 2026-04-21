@@ -4,6 +4,7 @@ using HngStageOne.Api.DTOs.Responses;
 using HngStageOne.Api.Domain.Entities;
 using HngStageOne.Api.Helpers;
 using HngStageOne.Api.Helpers.Exceptions;
+using HngStageOne.Api.Models;
 using HngStageOne.Api.Repositories.Interfaces;
 using HngStageOne.Api.Services.Interfaces;
 
@@ -15,32 +16,36 @@ public class ProfileService : IProfileService
     private readonly IGenderizeClient _genderizeClient;
     private readonly IAgifyClient _agifyClient;
     private readonly INationalizeClient _nationalizeClient;
+    private readonly IProfileQueryValidator _queryValidator;
+    private readonly INaturalLanguageProfileQueryParser _queryParser;
 
     public ProfileService(
         IProfileRepository repository,
         IGenderizeClient genderizeClient,
         IAgifyClient agifyClient,
-        INationalizeClient nationalizeClient)
+        INationalizeClient nationalizeClient,
+        IProfileQueryValidator queryValidator,
+        INaturalLanguageProfileQueryParser queryParser)
     {
         _repository = repository;
         _genderizeClient = genderizeClient;
         _agifyClient = agifyClient;
         _nationalizeClient = nationalizeClient;
+        _queryValidator = queryValidator;
+        _queryParser = queryParser;
     }
 
-    public async Task<SingleProfileResponse> CreateProfileAsync(CreateProfileRequest request)
+    public async Task<SingleProfileResponse> CreateProfileAsync(CreateProfileRequest request, CancellationToken cancellationToken = default)
     {
-        string name = request.Name;
-
-        if (string.IsNullOrWhiteSpace(name))
+        if (request == null || string.IsNullOrWhiteSpace(request.Name))
         {
-            throw new ArgumentException("Name cannot be empty or whitespace");
+            throw new MissingOrEmptyParameterException();
         }
 
-        string normalizedName = NameNormalizer.Normalize(name);
+        var name = request.Name.Trim();
 
         // Check if profile already exists
-        var existingProfile = await _repository.GetByNormalizedNameAsync(normalizedName);
+        var existingProfile = await _repository.GetByNameAsync(name, cancellationToken);
         if (existingProfile != null)
         {
             return new SingleProfileResponse
@@ -88,21 +93,20 @@ public class ProfileService : IProfileService
         // Create profile
         var profile = new Profile
         {
-            Id = Guid.NewGuid(),
+            Id = Guid.CreateVersion7(),
             Name = name,
-            NormalizedName = normalizedName,
             Gender = genderResponse.Gender.ToLower(),
-            GenderProbability = genderResponse.Probability ?? 0,
-            SampleSize = genderResponse.Count ?? 0,
+            GenderProbability = Convert.ToDouble(genderResponse.Probability ?? 0),
             Age = ageResponse.Age.Value,
             AgeGroup = ageGroup,
             CountryId = topCountry.CountryId.ToUpper(),
-            CountryProbability = topCountry.Probability ?? 0,
-            CreatedAt = DateTimeOffset.UtcNow
+            CountryName = CountryLookup.ResolveName(topCountry.CountryId),
+            CountryProbability = Convert.ToDouble(topCountry.Probability ?? 0),
+            CreatedAt = DateTime.UtcNow
         };
 
-        await _repository.AddAsync(profile);
-        await _repository.SaveChangesAsync();
+        await _repository.AddAsync(profile, cancellationToken);
+        await _repository.SaveChangesAsync(cancellationToken);
 
         return new SingleProfileResponse
         {
@@ -111,9 +115,9 @@ public class ProfileService : IProfileService
         };
     }
 
-    public async Task<SingleProfileResponse> GetProfileByIdAsync(Guid id)
+    public async Task<SingleProfileResponse> GetProfileByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var profile = await _repository.GetByIdAsync(id);
+        var profile = await _repository.GetByIdAsync(id, cancellationToken);
         if (profile == null)
         {
             throw new ProfileNotFoundException();
@@ -126,38 +130,39 @@ public class ProfileService : IProfileService
         };
     }
 
-    public async Task<ProfilesListResponse> GetAllProfilesAsync(string? gender = null, string? countryId = null, string? ageGroup = null)
+    public async Task<ProfilesListResponse> GetProfilesAsync(ProfileQueryRequest request, CancellationToken cancellationToken = default)
     {
-        var profiles = await _repository.GetAllAsync(gender, countryId, ageGroup);
-
-        var data = profiles.Select(p => new ProfileListItemResponse
-        {
-            Id = p.Id,
-            Name = p.Name,
-            Gender = p.Gender,
-            Age = p.Age,
-            AgeGroup = p.AgeGroup,
-            CountryId = p.CountryId
-        }).ToList();
-
-        return new ProfilesListResponse
-        {
-            Status = "success",
-            Count = data.Count,
-            Data = data
-        };
+        var options = _queryValidator.Validate(request);
+        var profiles = await _repository.QueryAsync(options, cancellationToken);
+        return MapToProfilesListResponse(profiles);
     }
 
-    public async Task DeleteProfileAsync(Guid id)
+    public async Task<ProfilesListResponse> SearchProfilesAsync(ProfileSearchRequest request, CancellationToken cancellationToken = default)
     {
-        var profile = await _repository.GetByIdAsync(id);
+        if (request == null || string.IsNullOrWhiteSpace(request.Q))
+        {
+            throw new MissingOrEmptyParameterException();
+        }
+
+        var paging = _queryValidator.ValidateSearch(request.Page, request.Limit);
+        var parsedOptions = _queryParser.Parse(request.Q);
+        parsedOptions.Page = paging.Page;
+        parsedOptions.Limit = paging.Limit;
+
+        var profiles = await _repository.QueryAsync(parsedOptions, cancellationToken);
+        return MapToProfilesListResponse(profiles);
+    }
+
+    public async Task DeleteProfileAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var profile = await _repository.GetByIdAsync(id, cancellationToken);
         if (profile == null)
         {
             throw new ProfileNotFoundException();
         }
 
-        await _repository.DeleteAsync(profile);
-        await _repository.SaveChangesAsync();
+        await _repository.DeleteAsync(profile, cancellationToken);
+        await _repository.SaveChangesAsync(cancellationToken);
     }
 
     private static ProfileDetailResponse MapToProfileDetailResponse(Profile profile)
@@ -168,12 +173,24 @@ public class ProfileService : IProfileService
             Name = profile.Name,
             Gender = profile.Gender,
             GenderProbability = profile.GenderProbability,
-            SampleSize = profile.SampleSize,
             Age = profile.Age,
             AgeGroup = profile.AgeGroup,
             CountryId = profile.CountryId,
+            CountryName = profile.CountryName,
             CountryProbability = profile.CountryProbability,
-            CreatedAt = profile.CreatedAt.ToString("O")
+            CreatedAt = profile.CreatedAt.ToUniversalTime().ToString("O")
+        };
+    }
+
+    private static ProfilesListResponse MapToProfilesListResponse(PagedResult<Profile> profiles)
+    {
+        return new ProfilesListResponse
+        {
+            Status = "success",
+            Page = profiles.Page,
+            Limit = profiles.Limit,
+            Total = profiles.Total,
+            Data = profiles.Items.Select(MapToProfileDetailResponse).ToList()
         };
     }
 }
