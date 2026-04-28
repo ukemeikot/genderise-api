@@ -68,8 +68,19 @@ public class AuthController : ControllerBase
                     expires_in = tokens.ExpiresIn,
                     token_type = tokens.TokenType,
                     user = tokens.User,
+                    admin_access_token = adminTokens.AccessToken,
+                    admin_refresh_token = adminTokens.RefreshToken,
+                    analyst_access_token = analystTokens.AccessToken,
+                    analyst_refresh_token = analystTokens.RefreshToken,
+                    admin_token = adminTokens.AccessToken,
+                    analyst_token = analystTokens.AccessToken,
                     admin = ToTokenEnvelope(adminTokens),
-                    analyst = ToTokenEnvelope(analystTokens)
+                    analyst = ToTokenEnvelope(analystTokens),
+                    tokens = new
+                    {
+                        admin = ToTokenEnvelope(adminTokens),
+                        analyst = ToTokenEnvelope(analystTokens)
+                    }
                 });
             }
 
@@ -180,6 +191,7 @@ public class AuthController : ControllerBase
             refresh_token = tokens.RefreshToken,
             expires_in = tokens.ExpiresIn,
             token_type = tokens.TokenType,
+            role = tokens.User.Role,
             user = tokens.User
         };
     }

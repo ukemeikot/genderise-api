@@ -43,11 +43,24 @@ public class UsersController : ControllerBase
         {
             status = "success",
             id = response.Id,
+            github_id = user.GitHubId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            username = user.GitHubUsername,
             github_username = response.GitHubUsername,
             email = response.Email,
             avatar_url = response.AvatarUrl,
             role = response.Role,
-            data = response
+            is_active = user.IsActive,
+            data = new
+            {
+                id = response.Id,
+                github_id = user.GitHubId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                username = user.GitHubUsername,
+                github_username = response.GitHubUsername,
+                email = response.Email,
+                avatar_url = response.AvatarUrl,
+                role = response.Role,
+                is_active = user.IsActive
+            }
         });
     }
 }

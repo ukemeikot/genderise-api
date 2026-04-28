@@ -227,6 +227,7 @@ app.UseMiddleware<RequestLoggingMiddleware>();
 // Use CORS
 app.UseCors("ConfiguredCors");
 
+app.UseMiddleware<AuthRateLimitMiddleware>();
 app.UseRateLimiter();
 
 // Global Exception Handling Middleware
