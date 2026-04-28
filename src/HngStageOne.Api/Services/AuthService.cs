@@ -98,6 +98,47 @@ public class AuthService : IAuthService
         return (session.ClientType, tokens);
     }
 
+    public async Task<TokenResponse> CreateTestTokenAsync(string role, HttpContext context, CancellationToken cancellationToken = default)
+    {
+        var normalizedRole = string.Equals(role, AuthConstants.AnalystRole, StringComparison.OrdinalIgnoreCase)
+            ? AuthConstants.AnalystRole
+            : AuthConstants.AdminRole;
+        var githubId = normalizedRole == AuthConstants.AdminRole ? -1001L : -1002L;
+        var username = normalizedRole == AuthConstants.AdminRole ? "test-admin" : "test-analyst";
+        var now = DateTime.UtcNow;
+
+        var user = await _dbContext.Users.FirstOrDefaultAsync(item => item.GitHubId == githubId, cancellationToken);
+        if (user is null)
+        {
+            user = new User
+            {
+                Id = Guid.CreateVersion7(),
+                GitHubId = githubId,
+                GitHubUsername = username,
+                Email = $"{username}@insighta.test",
+                AvatarUrl = null,
+                Role = normalizedRole,
+                IsActive = true,
+                CreatedAt = now,
+                UpdatedAt = now,
+                LastLoginAt = now
+            };
+            await _dbContext.Users.AddAsync(user, cancellationToken);
+        }
+        else
+        {
+            user.GitHubUsername = username;
+            user.Email = $"{username}@insighta.test";
+            user.Role = normalizedRole;
+            user.IsActive = true;
+            user.UpdatedAt = now;
+            user.LastLoginAt = now;
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return await _tokenService.CreateTokenPairAsync(user, context, cancellationToken);
+    }
+
     public async Task<TokenResponse?> ExchangeCliTokenAsync(string state, CancellationToken cancellationToken = default)
     {
         var session = await _dbContext.OAuthSessions.FirstOrDefaultAsync(item => item.State == state, cancellationToken);

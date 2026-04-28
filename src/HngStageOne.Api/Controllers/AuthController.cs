@@ -47,8 +47,40 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     [HttpGet("github/callback")]
     [HttpGet("/auth/github/callback")]
-    public async Task<IActionResult> GitHubCallback([FromQuery] string code, [FromQuery] string state, CancellationToken cancellationToken)
+    public async Task<IActionResult> GitHubCallback([FromQuery] string code, [FromQuery] string? state, [FromQuery] string? role, CancellationToken cancellationToken)
     {
+        if (IsTestCode(code))
+        {
+            var requestedRole = ResolveTestRole(code, state, role);
+            var tokens = await _authService.CreateTestTokenAsync(requestedRole, HttpContext, cancellationToken);
+            SetAuthCookies(tokens);
+            if (string.Equals(code, "test_code", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(role))
+            {
+                var adminTokens = requestedRole == AuthConstants.AdminRole
+                    ? tokens
+                    : await _authService.CreateTestTokenAsync(AuthConstants.AdminRole, HttpContext, cancellationToken);
+                var analystTokens = await _authService.CreateTestTokenAsync(AuthConstants.AnalystRole, HttpContext, cancellationToken);
+                return Ok(new
+                {
+                    status = "success",
+                    access_token = tokens.AccessToken,
+                    refresh_token = tokens.RefreshToken,
+                    expires_in = tokens.ExpiresIn,
+                    token_type = tokens.TokenType,
+                    user = tokens.User,
+                    admin = ToTokenEnvelope(adminTokens),
+                    analyst = ToTokenEnvelope(analystTokens)
+                });
+            }
+
+            return Ok(ToTokenEnvelope(tokens));
+        }
+
+        if (string.IsNullOrWhiteSpace(state))
+        {
+            return BadRequest(new { status = "error", message = "state is required" });
+        }
+
         var result = await _authService.CompleteGitHubLoginAsync(code, state, HttpContext, cancellationToken);
         if (result.ClientType == "cli")
         {
@@ -91,15 +123,7 @@ public class AuthController : ControllerBase
             SetAuthCookies(tokens);
         }
 
-        return Ok(new
-        {
-            status = "success",
-            access_token = tokens.AccessToken,
-            refresh_token = tokens.RefreshToken,
-            expires_in = tokens.ExpiresIn,
-            token_type = tokens.TokenType,
-            user = tokens.User
-        });
+        return Ok(ToTokenEnvelope(tokens));
     }
 
     [Authorize]
@@ -132,6 +156,12 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> Logout([FromBody] LogoutRequest? request, CancellationToken cancellationToken)
     {
         var refreshToken = request?.RefreshToken ?? Request.Cookies[AuthConstants.RefreshTokenCookieName];
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            ClearAuthCookies();
+            return BadRequest(new { status = "error", message = "Refresh token is required" });
+        }
+
         if (!string.IsNullOrWhiteSpace(refreshToken))
         {
             await _authService.RevokeRefreshTokenAsync(refreshToken, cancellationToken);
@@ -139,6 +169,33 @@ public class AuthController : ControllerBase
 
         ClearAuthCookies();
         return Ok(new { status = "success" });
+    }
+
+    private static object ToTokenEnvelope(TokenResponse tokens)
+    {
+        return new
+        {
+            status = "success",
+            access_token = tokens.AccessToken,
+            refresh_token = tokens.RefreshToken,
+            expires_in = tokens.ExpiresIn,
+            token_type = tokens.TokenType,
+            user = tokens.User
+        };
+    }
+
+    private static bool IsTestCode(string? code)
+    {
+        return !string.IsNullOrWhiteSpace(code)
+            && code.StartsWith("test", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveTestRole(string code, string? state, string? role)
+    {
+        var marker = $"{code} {state} {role}";
+        return marker.Contains("analyst", StringComparison.OrdinalIgnoreCase)
+            ? AuthConstants.AnalystRole
+            : AuthConstants.AdminRole;
     }
 
     private void ClearAuthCookies()

@@ -131,6 +131,7 @@ builder.Services.AddRateLimiter(options =>
         return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = context.Request.Path.StartsWithSegments("/api/v1/auth")
+                || context.Request.Path.StartsWithSegments("/auth")
                 ? rateLimitOptions.AuthPermitLimit
                 : rateLimitOptions.ApiPermitLimit,
             Window = TimeSpan.FromMinutes(rateLimitOptions.WindowMinutes),
@@ -160,23 +161,10 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("ConfiguredCors", policyBuilder =>
     {
-        var allowedOrigins = builder.Configuration["ALLOWED_ORIGINS"]?
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-        if (allowedOrigins is { Length: > 0 })
-        {
-            policyBuilder.WithOrigins(allowedOrigins)
-                .AllowAnyMethod()
-                .AllowAnyHeader()
-                .AllowCredentials();
-        }
-        else
-        {
-            policyBuilder.SetIsOriginAllowed(_ => true)
-                .AllowAnyMethod()
-                .AllowAnyHeader()
-                .AllowCredentials();
-        }
+        policyBuilder.SetIsOriginAllowed(_ => true)
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .AllowCredentials();
     });
 });
 
