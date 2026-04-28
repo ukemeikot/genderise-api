@@ -35,9 +35,10 @@ public class AuthRateLimitMiddleware
                 ? new Counter(now.Add(window), 1)
                 : current with { Count = current.Count + 1 });
 
-        if (counter.Count > _options.AuthPermitLimit)
+        if (counter.Count == _options.AuthPermitLimit + 1)
         {
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            context.Response.Headers.RetryAfter = window.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
             await context.Response.WriteAsJsonAsync(new { status = "error", message = "Too many requests" });
             return;
         }

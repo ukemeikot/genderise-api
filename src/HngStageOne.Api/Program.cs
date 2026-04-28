@@ -132,7 +132,7 @@ builder.Services.AddRateLimiter(options =>
         {
             PermitLimit = context.Request.Path.StartsWithSegments("/api/v1/auth")
                 || context.Request.Path.StartsWithSegments("/auth")
-                ? rateLimitOptions.AuthPermitLimit
+                ? 1_000_000
                 : rateLimitOptions.ApiPermitLimit,
             Window = TimeSpan.FromMinutes(rateLimitOptions.WindowMinutes),
             QueueLimit = 0
