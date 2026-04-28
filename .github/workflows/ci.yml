@@ -1,0 +1,19 @@
+name: Backend CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - run: dotnet restore HngStageOne.sln
+      - run: dotnet build HngStageOne.sln --configuration Release --no-restore
+      - run: dotnet test HngStageOne.sln --configuration Release --no-build

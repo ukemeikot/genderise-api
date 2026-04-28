@@ -1,5 +1,7 @@
 using HngStageOne.Api.Clients.Interfaces;
 using HngStageOne.Api.DTOs.ExternalApis;
+using HngStageOne.Api.Options;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 
 namespace HngStageOne.Api.Clients.Implementations;
@@ -7,12 +9,11 @@ namespace HngStageOne.Api.Clients.Implementations;
 public class AgifyClient : IAgifyClient
 {
     private readonly HttpClient _httpClient;
-    private const string BaseUrl = "https://api.agify.io";
 
-    public AgifyClient(HttpClient httpClient)
+    public AgifyClient(HttpClient httpClient, IOptions<ExternalApiOptions> options)
     {
         _httpClient = httpClient;
-        _httpClient.BaseAddress = new Uri(BaseUrl);
+        _httpClient.BaseAddress = new Uri(options.Value.AgifyBaseUrl);
     }
 
     public async Task<AgifyResponse?> GetAgeAsync(string name)

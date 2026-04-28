@@ -32,42 +32,7 @@ public class ProfileRepository : IProfileRepository
 
     public async Task<PagedResult<Profile>> QueryAsync(ProfileQueryOptions options, CancellationToken cancellationToken = default)
     {
-        var query = _context.Profiles.AsNoTracking().AsQueryable();
-
-        if (!string.IsNullOrWhiteSpace(options.Gender))
-        {
-            query = query.Where(profile => profile.Gender == options.Gender);
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.AgeGroup))
-        {
-            query = query.Where(profile => profile.AgeGroup == options.AgeGroup);
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.CountryId))
-        {
-            query = query.Where(profile => profile.CountryId == options.CountryId);
-        }
-
-        if (options.MinAge.HasValue)
-        {
-            query = query.Where(profile => profile.Age >= options.MinAge.Value);
-        }
-
-        if (options.MaxAge.HasValue)
-        {
-            query = query.Where(profile => profile.Age <= options.MaxAge.Value);
-        }
-
-        if (options.MinGenderProbability.HasValue)
-        {
-            query = query.Where(profile => profile.GenderProbability >= options.MinGenderProbability.Value);
-        }
-
-        if (options.MinCountryProbability.HasValue)
-        {
-            query = query.Where(profile => profile.CountryProbability >= options.MinCountryProbability.Value);
-        }
+        var query = ApplyFilters(options);
 
         var total = await query.CountAsync(cancellationToken);
         query = ApplySorting(query, options);
@@ -84,6 +49,11 @@ public class ProfileRepository : IProfileRepository
             Total = total,
             Items = profiles
         };
+    }
+
+    public async Task<IReadOnlyList<Profile>> QueryAllAsync(ProfileQueryOptions options, CancellationToken cancellationToken = default)
+    {
+        return await ApplySorting(ApplyFilters(options), options).ToListAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyCollection<string>> GetExistingNamesAsync(IEnumerable<string> names, CancellationToken cancellationToken = default)
@@ -140,5 +110,47 @@ public class ProfileRepository : IProfileRepository
             ("created_at", false) => query.OrderBy(profile => profile.CreatedAt).ThenBy(profile => profile.Id),
             _ => query.OrderByDescending(profile => profile.CreatedAt).ThenBy(profile => profile.Id)
         };
+    }
+
+    private IQueryable<Profile> ApplyFilters(ProfileQueryOptions options)
+    {
+        var query = _context.Profiles.AsNoTracking().AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(options.Gender))
+        {
+            query = query.Where(profile => profile.Gender == options.Gender);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.AgeGroup))
+        {
+            query = query.Where(profile => profile.AgeGroup == options.AgeGroup);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.CountryId))
+        {
+            query = query.Where(profile => profile.CountryId == options.CountryId);
+        }
+
+        if (options.MinAge.HasValue)
+        {
+            query = query.Where(profile => profile.Age >= options.MinAge.Value);
+        }
+
+        if (options.MaxAge.HasValue)
+        {
+            query = query.Where(profile => profile.Age <= options.MaxAge.Value);
+        }
+
+        if (options.MinGenderProbability.HasValue)
+        {
+            query = query.Where(profile => profile.GenderProbability >= options.MinGenderProbability.Value);
+        }
+
+        if (options.MinCountryProbability.HasValue)
+        {
+            query = query.Where(profile => profile.CountryProbability >= options.MinCountryProbability.Value);
+        }
+
+        return query;
     }
 }

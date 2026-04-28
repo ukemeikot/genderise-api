@@ -1,5 +1,5 @@
-using HngStageOne.Api.Constants;
 using System.Text;
+using HngStageOne.Api.Constants;
 using HngStageOne.Api.DTOs.Requests;
 using HngStageOne.Api.DTOs.Responses;
 using HngStageOne.Api.Services.Interfaces;
@@ -10,18 +10,18 @@ namespace HngStageOne.Api.Controllers;
 
 [ApiController]
 [Authorize(Policy = AuthConstants.AnalystOrAdminPolicy)]
-[Route(ApiRoutes.Profiles.Base)]
-public class ProfilesController : ControllerBase
+[Route("api/v1/profiles")]
+public class V1ProfilesController : ControllerBase
 {
     private readonly IProfileService _profileService;
 
-    public ProfilesController(IProfileService profileService)
+    public V1ProfilesController(IProfileService profileService)
     {
         _profileService = profileService;
     }
 
-    [HttpPost]
     [Authorize(Policy = AuthConstants.AdminOnlyPolicy)]
+    [HttpPost]
     public async Task<IActionResult> CreateProfile([FromBody] CreateProfileRequest request, CancellationToken cancellationToken)
     {
         var result = await _profileService.CreateProfileAsync(request, cancellationToken);
@@ -39,60 +39,48 @@ public class ProfilesController : ControllerBase
     public async Task<IActionResult> GetAllProfiles([FromQuery] ProfileQueryRequest request, CancellationToken cancellationToken)
     {
         var result = await _profileService.GetProfilesAsync(request, cancellationToken);
-        AddPaginationLinks(result);
-        return Ok(result);
+        return Ok(ToV1(result));
     }
 
     [HttpGet("search")]
     public async Task<IActionResult> SearchProfiles([FromQuery] ProfileSearchRequest request, CancellationToken cancellationToken)
     {
         var result = await _profileService.SearchProfilesAsync(request, cancellationToken);
-        AddPaginationLinks(result);
-        return Ok(result);
+        return Ok(ToV1(result));
     }
 
-    [HttpGet("export")]
-    public async Task<IActionResult> ExportProfiles([FromQuery] ProfileQueryRequest request, [FromQuery] string? format, CancellationToken cancellationToken)
+    [HttpGet("export.csv")]
+    public async Task<IActionResult> ExportProfiles([FromQuery] ProfileQueryRequest request, [FromQuery(Name = "q")] string? q, CancellationToken cancellationToken)
     {
-        if (!string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase))
-        {
-            return BadRequest(new { status = "error", message = "format=csv is required" });
-        }
-
-        var profiles = await _profileService.ExportProfilesAsync(request, null, cancellationToken);
+        var profiles = await _profileService.ExportProfilesAsync(request, q, cancellationToken);
         var csv = BuildCsv(profiles);
-        var fileName = $"profiles_{DateTime.UtcNow:yyyyMMddHHmmss}.csv";
+        var fileName = $"profiles-export-{DateTime.UtcNow:yyyy-MM-dd}.csv";
         return File(Encoding.UTF8.GetBytes(csv), "text/csv", fileName);
     }
 
-    [HttpDelete("{id}")]
     [Authorize(Policy = AuthConstants.AdminOnlyPolicy)]
+    [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteProfile(Guid id, CancellationToken cancellationToken)
     {
         await _profileService.DeleteProfileAsync(id, cancellationToken);
         return NoContent();
     }
 
-    private void AddPaginationLinks(ProfilesListResponse response)
+    private static V1ProfilesListResponse ToV1(ProfilesListResponse response)
     {
-        response.Links = BuildLinks(Request, response.Page, response.Limit, response.TotalPages);
-    }
-
-    private static PaginationLinks BuildLinks(HttpRequest request, int page, int limit, int totalPages)
-    {
-        string LinkFor(int targetPage)
+        return new V1ProfilesListResponse
         {
-            var values = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(request.QueryString.Value);
-            values["page"] = targetPage.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            values["limit"] = limit.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            return Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(request.Path.Value ?? "/api/profiles", values.ToDictionary(item => item.Key, item => (string?)item.Value.ToString()));
-        }
-
-        return new PaginationLinks
-        {
-            Self = LinkFor(page),
-            Next = page < totalPages ? LinkFor(page + 1) : null,
-            Prev = page > 1 ? LinkFor(page - 1) : null
+            Status = response.Status,
+            Data = response.Data,
+            Pagination = new PaginationMetadata
+            {
+                Page = response.Page,
+                Limit = response.Limit,
+                Total = response.Total,
+                TotalPages = response.TotalPages,
+                HasNext = response.Page < response.TotalPages,
+                HasPrevious = response.Page > 1
+            }
         };
     }
 

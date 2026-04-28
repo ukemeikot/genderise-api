@@ -1,5 +1,7 @@
 using HngStageOne.Api.Clients.Interfaces;
 using HngStageOne.Api.DTOs.ExternalApis;
+using HngStageOne.Api.Options;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 
 namespace HngStageOne.Api.Clients.Implementations;
@@ -7,12 +9,11 @@ namespace HngStageOne.Api.Clients.Implementations;
 public class NationalizeClient : INationalizeClient
 {
     private readonly HttpClient _httpClient;
-    private const string BaseUrl = "https://api.nationalize.io";
 
-    public NationalizeClient(HttpClient httpClient)
+    public NationalizeClient(HttpClient httpClient, IOptions<ExternalApiOptions> options)
     {
         _httpClient = httpClient;
-        _httpClient.BaseAddress = new Uri(BaseUrl);
+        _httpClient.BaseAddress = new Uri(options.Value.NationalizeBaseUrl);
     }
 
     public async Task<NationalizeResponse?> GetNationalityAsync(string name)

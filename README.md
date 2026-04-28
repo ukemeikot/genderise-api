@@ -1,89 +1,97 @@
-# HNG Stage 2 Backend - Queryable Intelligence Engine
+# Insighta Labs+ Stage 3 Backend
 
-## Overview
+ASP.NET Core backend for the Insighta Labs+ profile intelligence platform. Stage 2 profile filtering, sorting, pagination, and natural language search are preserved, with Stage 3 security and multi-interface access added on top.
 
-This project upgrades the original stage-one demographic profile API into a queryable intelligence engine for Insighta Labs. It now supports:
+## System Architecture
 
-- advanced filtering with combinable conditions
-- sorting and pagination
-- rule-based natural language search
-- idempotent seeding of the provided `seed_profiles.json` dataset
+- Backend API: ASP.NET Core, EF Core, SQLite
+- Auth: GitHub OAuth with PKCE, JWT access tokens, rotating refresh tokens
+- Interfaces: web portal via HTTP-only cookies, CLI via bearer tokens
+- Authorization: `admin` and `analyst` roles enforced with ASP.NET policies
+- Data: profile records plus users, OAuth sessions, and refresh tokens
+- Deployment: backend and web portal can run together with `docker-compose.stage3.yml` from the parent folder
 
-The API is built with ASP.NET Core, Entity Framework Core, and SQLite.
+## Authentication Flow
 
-## What Changed
+Browser login:
 
-The stage-two implementation adds these production-oriented features:
+1. Web redirects to `GET /api/v1/auth/github/start?client=web`.
+2. Backend creates OAuth state and PKCE verifier/challenge.
+3. GitHub redirects to `/api/v1/auth/github/callback`.
+4. Backend exchanges the code, creates/updates the user, sets HTTP-only auth cookies, and redirects to the web portal.
 
-- `GET /api/profiles` now supports advanced filters, sorting, and pagination
-- `GET /api/profiles/search` accepts plain-English demographic queries
-- the `profiles` schema now matches the required stage-two structure
-- startup seeding loads the 2026 provided profiles without creating duplicates on reruns
-- all list responses now use the required `{ status, page, limit, total, data }` format
-- validation and error handling now return standardized automated-grading-friendly payloads
+CLI login:
 
-## Profiles Schema
+1. CLI calls `POST /api/v1/auth/cli/start`.
+2. Backend returns a GitHub authorization URL and state.
+3. User completes GitHub login in the browser.
+4. CLI polls `POST /api/v1/auth/cli/exchange`.
+5. CLI stores credentials at `~/.insighta/credentials.json`.
 
-The `Profiles` table is aligned to the required fields:
+## Token Handling Approach
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `id` | UUID v7 | Primary key |
-| `name` | VARCHAR + UNIQUE | Full name |
-| `gender` | VARCHAR | `male` or `female` |
-| `gender_probability` | FLOAT | Confidence score |
-| `age` | INT | Exact age |
-| `age_group` | VARCHAR | `child`, `teenager`, `adult`, `senior` |
-| `country_id` | VARCHAR(2) | ISO country code |
-| `country_name` | VARCHAR | Full country name |
-| `country_probability` | FLOAT | Confidence score |
-| `created_at` | TIMESTAMP | UTC timestamp |
+- Access tokens are JWTs with a short lifetime, default `3` minutes.
+- Refresh tokens are random secrets stored only as SHA-256 hashes in the database.
+- Refresh tokens rotate on every refresh.
+- Refresh tokens expire after `5` minutes by default.
+- Web clients receive tokens in HTTP-only cookies.
+- Web unsafe requests must send `X-CSRF-TOKEN` matching the readable `XSRF-TOKEN` cookie.
+- CLI clients send `Authorization: Bearer <access_token>` and refresh automatically.
 
-## Seeding
+## Role Enforcement Logic
 
-The repo includes the required dataset in [seed_profiles.json](/c:/Users/User/Desktop/HNG%20INTERNSHIP/HNG-BACKEND/hng-task-one/seed_profiles.json).
+Roles:
 
-- the file contains exactly 2026 profiles
-- the application checks for `seed_profiles.json` at startup
-- rerunning startup seeding does not insert duplicates because seeding checks existing names before insert
+- `admin`: can read, search, export, create, and delete profiles
+- `analyst`: can read, search, and export profiles
 
-## API Endpoints
+Admin users are assigned by GitHub username through:
 
-### `POST /api/profiles`
-
-Creates a profile from external demographic APIs. Duplicate names return the existing profile instead of creating another row.
-
-### `GET /api/profiles/{id}`
-
-Returns a single profile by UUID.
-
-### `DELETE /api/profiles/{id}`
-
-Deletes a single profile.
-
-### `GET /api/profiles`
-
-Supports these query parameters:
-
-- `gender`
-- `age_group`
-- `country_id`
-- `min_age`
-- `max_age`
-- `min_gender_probability`
-- `min_country_probability`
-- `sort_by` = `age` | `created_at` | `gender_probability`
-- `order` = `asc` | `desc`
-- `page` default `1`
-- `limit` default `10`, max `50`
-
-Example:
-
-```text
-/api/profiles?gender=male&country_id=NG&min_age=25&sort_by=age&order=desc&page=1&limit=10
+```bash
+Auth__AdminGitHubUsernames=your-github-username,another-admin
 ```
 
-Example response:
+Protected profile routes:
+
+```text
+GET    /api/v1/profiles              analyst or admin
+GET    /api/v1/profiles/{id}         analyst or admin
+GET    /api/v1/profiles/search       analyst or admin
+GET    /api/v1/profiles/export.csv   analyst or admin
+POST   /api/v1/profiles              admin only
+DELETE /api/v1/profiles/{id}         admin only
+```
+
+Legacy `/api/profiles` routes are also protected with the same policies while retaining the Stage 2 response behavior.
+
+## Natural Language Parsing Approach
+
+Natural language search remains rule-based in `NaturalLanguageProfileQueryParser`. The parser converts supported plain-English phrases into the same structured query options used by filtered profile listing.
+
+Examples:
+
+```text
+young males from nigeria
+females above 30
+adult males from kenya
+male and female teenagers above 17
+```
+
+Unsupported phrases return the existing standardized error response.
+
+## API Versioning And Pagination
+
+Profile requests must include:
+
+```text
+X-API-Version: 1
+```
+
+Requests without the header return `400 Bad Request`.
+
+The canonical Stage 3 profile routes live under `/api/profiles`; `/api/v1/profiles` remains available for compatibility.
+
+The list/search response uses:
 
 ```json
 {
@@ -91,68 +99,66 @@ Example response:
   "page": 1,
   "limit": 10,
   "total": 2026,
-  "data": [
-    {
-      "id": "01964f9e-bf74-7a91-a1ce-6df7c57e0f0b",
-      "name": "Bayo Ouédraogo",
-      "gender": "male",
-      "gender_probability": 0.99,
-      "age": 27,
-      "age_group": "adult",
-      "country_id": "NG",
-      "country_name": "Nigeria",
-      "country_probability": 0.81,
-      "created_at": "2026-04-21T12:00:00.0000000Z"
-    }
-  ]
+  "total_pages": 203,
+  "links": {
+    "self": "/api/profiles?page=1&limit=10",
+    "next": "/api/profiles?page=2&limit=10",
+    "prev": null
+  },
+  "data": [],
 }
 ```
 
-### `GET /api/profiles/search`
-
-Supports rule-based natural language parsing through the `q` parameter.
-
-Example:
+## CSV Export
 
 ```text
-/api/profiles/search?q=young males from nigeria&page=1&limit=10
+GET /api/profiles/export?format=csv
 ```
 
-Supported mappings include:
+The export supports the same filters and sorting as profile listing. `/api/v1/profiles/export.csv` remains available for compatibility.
 
-- `young males` -> `gender=male`, `min_age=16`, `max_age=24`
-- `females above 30` -> `gender=female`, `min_age=30`
-- `people from angola` -> `country_id=AO`
-- `adult males from kenya` -> `gender=male`, `age_group=adult`, `country_id=KE`
-- `male and female teenagers above 17` -> `age_group=teenager`, `min_age=17`
+## CLI Usage
 
-If a query cannot be interpreted, the API returns:
+From the sibling `stage-3-cli` repo:
 
-```json
-{
-  "status": "error",
-  "message": "Unable to interpret query"
-}
+```bash
+dotnet pack
+dotnet tool install --global --add-source ./bin/Release Insighta.Cli
+insighta config set-backend https://your-backend-url.com
+insighta login
+insighta profiles list --gender male --page 1 --limit 10
+insighta profiles search "young males from nigeria"
+insighta profiles export profiles.csv
 ```
 
-## Validation and Errors
+## Environment Variables
 
-All errors use this format:
+Copy `.env.example` and fill in:
 
-```json
-{
-  "status": "error",
-  "message": "<error message>"
-}
+```bash
+Auth__BackendPublicUrl=
+Auth__WebPortalUrl=
+Auth__AdminGitHubUsernames=
+Auth__OAuthSessionMinutes=10
+ALLOWED_ORIGINS=
+GitHub__ClientId=
+GitHub__ClientSecret=
+Jwt__SigningKey=
+Jwt__AccessTokenMinutes=3
+Jwt__RefreshTokenMinutes=5
+RateLimit__AuthPermitLimit=10
+RateLimit__ApiPermitLimit=60
+RateLimit__WindowMinutes=1
+ExternalApis__GenderizeBaseUrl=https://api.genderize.io
+ExternalApis__AgifyBaseUrl=https://api.agify.io
+ExternalApis__NationalizeBaseUrl=https://api.nationalize.io
 ```
 
-Status codes:
+GitHub OAuth callback:
 
-- `400 Bad Request` -> missing or empty parameter
-- `422 Unprocessable Entity` -> invalid query parameters
-- `404 Not Found` -> profile not found
-- `500 Internal Server Error` -> unexpected server failure
-- `502 Bad Gateway` -> invalid upstream API response
+```text
+https://your-backend-url.com/api/v1/auth/github/callback
+```
 
 ## Local Run
 
@@ -161,39 +167,20 @@ dotnet build src/HngStageOne.Api/HngStageOne.Api.csproj
 dotnet run --project src/HngStageOne.Api/HngStageOne.Api.csproj
 ```
 
-On startup the app will:
+Swagger in development:
 
-1. apply migrations
-2. seed `seed_profiles.json` if present
-3. expose the API locally
+```text
+http://localhost:5048/swagger
+```
+
+Docker:
+
+```bash
+docker compose up --build
+```
 
 ## Tests
-
-Focused tests were added for:
-
-- natural language parsing
-- query validation
-- seed file record count
-
-Run locally with:
 
 ```bash
 dotnet test
 ```
-
-## Deployment Notes
-
-For production deployment:
-
-1. publish or containerize the app
-2. ensure the SQLite database path is persistent
-3. keep `seed_profiles.json` alongside the deployed app or adjust startup seed path
-4. allow the app to run migrations on startup
-5. smoke-test `/api/profiles` and `/api/profiles/search` after deployment
-
-## Important Notes
-
-- CORS is configured with `Access-Control-Allow-Origin: *`
-- timestamps are returned in UTC ISO 8601 format
-- IDs are generated with UUID v7
-- list queries are executed server-side through `IQueryable` filtering, sorting, counting, and paging instead of loading the whole table into memory

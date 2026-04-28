@@ -13,6 +13,8 @@ bld/
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
+.dotnet/
+.nuget/
 
 # Visual Studio cache/options
 .vs/

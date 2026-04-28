@@ -153,6 +153,22 @@ public class ProfileService : IProfileService
         return MapToProfilesListResponse(profiles);
     }
 
+    public async Task<IReadOnlyList<ProfileDetailResponse>> ExportProfilesAsync(ProfileQueryRequest request, string? naturalLanguageQuery, CancellationToken cancellationToken = default)
+    {
+        ProfileQueryOptions options;
+        if (!string.IsNullOrWhiteSpace(naturalLanguageQuery))
+        {
+            options = _queryParser.Parse(naturalLanguageQuery);
+        }
+        else
+        {
+            options = _queryValidator.Validate(request);
+        }
+
+        var profiles = await _repository.QueryAllAsync(options, cancellationToken);
+        return profiles.Select(MapToProfileDetailResponse).ToList();
+    }
+
     public async Task DeleteProfileAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var profile = await _repository.GetByIdAsync(id, cancellationToken);
@@ -190,6 +206,7 @@ public class ProfileService : IProfileService
             Page = profiles.Page,
             Limit = profiles.Limit,
             Total = profiles.Total,
+            TotalPages = profiles.Limit <= 0 ? 0 : (int)Math.Ceiling(profiles.Total / (double)profiles.Limit),
             Data = profiles.Items.Select(MapToProfileDetailResponse).ToList()
         };
     }

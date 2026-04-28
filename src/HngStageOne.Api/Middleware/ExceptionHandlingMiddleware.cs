@@ -61,6 +61,16 @@ public class ExceptionHandlingMiddleware
                 message = $"{upstreamEx.ExternalApiName} returned an invalid response";
                 break;
 
+            case UnauthorizedAccessException unauthorizedAccessException:
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                message = unauthorizedAccessException.Message;
+                break;
+
+            case InvalidOperationException invalidOperationException:
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                message = invalidOperationException.Message;
+                break;
+
             default:
                 context.Response.StatusCode = StatusCodes.Status500InternalServerError;
                 message = "An unexpected error occurred";
