@@ -2,7 +2,7 @@
 
 ASP.NET Core backend for the Insighta Labs+ profile intelligence platform. The Stage 2 queryable engine (filters, sorting, pagination, natural-language search) and the Stage 3 security surface (GitHub OAuth, JWT, RBAC, CLI + web portal) are preserved. Stage 4B adds query performance, query normalization, and large-scale CSV ingestion on top.
 
-For a full write-up of the Stage 4B optimization work, including the design rationale and a before/after performance table, see [../SOLUTION.md](../SOLUTION.md).
+For a full write-up of the Stage 4B optimization work, including the design rationale and a before/after performance table, see [SOLUTION.md](SOLUTION.md).
 
 ## System Architecture
 
@@ -144,7 +144,7 @@ Cache-correctness rules:
 - `DeleteProfileAsync` additionally removes the affected `profiles:detail` key.
 - Best-effort cache invalidation: a cache failure never fails a write — the next read just falls through to the database and repopulates.
 
-See [../SOLUTION.md](../SOLUTION.md) §1 for the before/after measurement table and trade-offs.
+See [SOLUTION.md](SOLUTION.md) §1 for the before/after measurement table and trade-offs.
 
 ## CSV Data Ingestion (Stage 4B)
 
