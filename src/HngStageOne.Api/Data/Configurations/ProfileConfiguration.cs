@@ -57,5 +57,17 @@ public class ProfileConfiguration : IEntityTypeConfiguration<Profile>
         builder.HasIndex(p => p.CountryId);
         builder.HasIndex(p => p.Age);
         builder.HasIndex(p => p.CreatedAt);
+
+        builder.HasIndex(p => new { p.CountryId, p.Gender, p.Age })
+            .HasDatabaseName("IX_Profiles_Country_Gender_Age");
+
+        builder.HasIndex(p => new { p.Gender, p.AgeGroup })
+            .HasDatabaseName("IX_Profiles_Gender_AgeGroup");
+
+        builder.HasIndex(p => new { p.CountryId, p.AgeGroup })
+            .HasDatabaseName("IX_Profiles_Country_AgeGroup");
+
+        builder.HasIndex(p => new { p.CreatedAt, p.Id })
+            .HasDatabaseName("IX_Profiles_CreatedAt_Id");
     }
 }

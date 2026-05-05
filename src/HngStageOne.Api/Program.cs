@@ -25,7 +25,16 @@ builder.ValidateStageThreeConfiguration();
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? "Data Source=hng_stage_one.db";
 
-builder.Services.AddDbContext<AppDbContext>(options =>
+// DbContext pooling reuses configured DbContext instances across requests, reducing
+// per-request setup cost. Critical now that every read also touches the cache.
+builder.Services.AddDbContextPool<AppDbContext>(options =>
+    options.UseSqlite(connectionString));
+
+// Separate pooled factory for components that should not share the request-scoped DbContext.
+// CSV ingestion runs long batched transactions on its own context so query traffic on
+// other contexts is not blocked. Pooled factory registers IDbContextFactory<T> only;
+// it does not conflict with AddDbContextPool above.
+builder.Services.AddPooledDbContextFactory<AppDbContext>(options =>
     options.UseSqlite(connectionString));
 
 builder.Services.Configure<GitHubOptions>(builder.Configuration.GetSection("GitHub"));
@@ -149,6 +158,21 @@ builder.Services.AddScoped<IProfileQueryValidator, ProfileQueryValidator>();
 builder.Services.AddScoped<INaturalLanguageProfileQueryParser, NaturalLanguageProfileQueryParser>();
 builder.Services.AddScoped<IProfileSeedService, ProfileSeedService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddScoped<ICsvIngestionService, HngStageOne.Api.Services.CsvIngestionService>();
+builder.Services.AddSingleton<IQueryCache, HngStageOne.Api.Services.Caching.QueryCache>();
+
+// Distributed cache. AddDistributedMemoryCache is in-process and matches the
+// "no horizontal scaling" constraint of Stage 4B. The IDistributedCache abstraction
+// means swapping in Redis (AddStackExchangeRedisCache) is a one-line config change.
+builder.Services.AddDistributedMemoryCache();
+
+// Allow large multipart uploads for CSV ingestion (up to ~500k rows ≈ 100-200 MB CSV).
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = 500_000_000;
+    options.ValueLengthLimit = int.MaxValue;
+    options.MemoryBufferThreshold = int.MaxValue;
+});
 
 // Register HTTP Clients
 builder.Services.AddHttpClient<IGenderizeClient, GenderizeClient>();
@@ -185,6 +209,16 @@ using (var scope = app.Services.CreateScope())
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         dbContext.Database.Migrate();
         await AuthSchemaInitializer.EnsureAuthTablesAsync(dbContext);
+
+        // SQLite-only: WAL mode allows readers to coexist with a single writer.
+        // Without it, CSV ingestion would block list/search queries for the duration
+        // of every transaction. No-op for non-SQLite providers (executes harmlessly
+        // because the pragma syntax is SQLite-specific and won't reach other engines).
+        if (dbContext.Database.ProviderName?.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            await dbContext.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
+            await dbContext.Database.ExecuteSqlRawAsync("PRAGMA synchronous=NORMAL;");
+        }
 
         var seedLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
         var seedService = scope.ServiceProvider.GetRequiredService<IProfileSeedService>();

@@ -14,10 +14,12 @@ namespace HngStageOne.Api.Controllers;
 public class V1ProfilesController : ControllerBase
 {
     private readonly IProfileService _profileService;
+    private readonly ICsvIngestionService _csvIngestionService;
 
-    public V1ProfilesController(IProfileService profileService)
+    public V1ProfilesController(IProfileService profileService, ICsvIngestionService csvIngestionService)
     {
         _profileService = profileService;
+        _csvIngestionService = csvIngestionService;
     }
 
     [Authorize(Policy = AuthConstants.AdminOnlyPolicy)]
@@ -64,6 +66,28 @@ public class V1ProfilesController : ControllerBase
     {
         await _profileService.DeleteProfileAsync(id, cancellationToken);
         return NoContent();
+    }
+
+    /// <summary>
+    /// Streams a CSV file (up to 500,000 rows) and bulk-upserts the valid rows.
+    /// Bad rows are skipped; the response summarizes counts and reasons.
+    /// Admin-only; the upload runs off the request's DbContext via a context factory
+    /// so query traffic on other connections is not blocked.
+    /// </summary>
+    [Authorize(Policy = AuthConstants.AdminOnlyPolicy)]
+    [HttpPost("upload")]
+    [RequestFormLimits(MultipartBodyLengthLimit = 500_000_000)]
+    [RequestSizeLimit(500_000_000)]
+    public async Task<IActionResult> UploadCsv(IFormFile? file, CancellationToken cancellationToken)
+    {
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { status = "error", message = "file is required" });
+        }
+
+        await using var stream = file.OpenReadStream();
+        var summary = await _csvIngestionService.IngestAsync(stream, cancellationToken);
+        return Ok(summary);
     }
 
     private static V1ProfilesListResponse ToV1(ProfilesListResponse response)

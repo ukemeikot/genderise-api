@@ -6,6 +6,7 @@ using HngStageOne.Api.Helpers;
 using HngStageOne.Api.Helpers.Exceptions;
 using HngStageOne.Api.Models;
 using HngStageOne.Api.Repositories.Interfaces;
+using HngStageOne.Api.Services.Caching;
 using HngStageOne.Api.Services.Interfaces;
 
 namespace HngStageOne.Api.Services;
@@ -18,6 +19,15 @@ public class ProfileService : IProfileService
     private readonly INationalizeClient _nationalizeClient;
     private readonly IProfileQueryValidator _queryValidator;
     private readonly INaturalLanguageProfileQueryParser _queryParser;
+    private readonly IQueryCache _queryCache;
+
+    private const string ListScope    = "profiles:list";
+    private const string DetailScope  = "profiles:detail";
+    private const string ExportScope  = "profiles:export";
+
+    private static readonly TimeSpan ListTtl   = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan DetailTtl = TimeSpan.FromSeconds(120);
+    private static readonly TimeSpan ExportTtl = TimeSpan.FromSeconds(60);
 
     public ProfileService(
         IProfileRepository repository,
@@ -25,7 +35,8 @@ public class ProfileService : IProfileService
         IAgifyClient agifyClient,
         INationalizeClient nationalizeClient,
         IProfileQueryValidator queryValidator,
-        INaturalLanguageProfileQueryParser queryParser)
+        INaturalLanguageProfileQueryParser queryParser,
+        IQueryCache queryCache)
     {
         _repository = repository;
         _genderizeClient = genderizeClient;
@@ -33,6 +44,7 @@ public class ProfileService : IProfileService
         _nationalizeClient = nationalizeClient;
         _queryValidator = queryValidator;
         _queryParser = queryParser;
+        _queryCache = queryCache;
     }
 
     public async Task<SingleProfileResponse> CreateProfileAsync(CreateProfileRequest request, CancellationToken cancellationToken = default)
@@ -44,7 +56,6 @@ public class ProfileService : IProfileService
 
         var name = request.Name.Trim();
 
-        // Check if profile already exists
         var existingProfile = await _repository.GetByNameAsync(name, cancellationToken);
         if (existingProfile != null)
         {
@@ -56,12 +67,10 @@ public class ProfileService : IProfileService
             };
         }
 
-        // Call external APIs
         var genderResponse = await _genderizeClient.GetGenderAsync(name);
         var ageResponse = await _agifyClient.GetAgeAsync(name);
         var nationalityResponse = await _nationalizeClient.GetNationalityAsync(name);
 
-        // Validate responses
         if (genderResponse == null || string.IsNullOrWhiteSpace(genderResponse.Gender) || genderResponse.Count == 0)
         {
             throw new InvalidUpstreamResponseException("Genderize");
@@ -77,7 +86,6 @@ public class ProfileService : IProfileService
             throw new InvalidUpstreamResponseException("Nationalize");
         }
 
-        // Get the country with highest probability
         var topCountry = nationalityResponse.Country
             .OrderByDescending(c => c.Probability)
             .FirstOrDefault();
@@ -87,10 +95,8 @@ public class ProfileService : IProfileService
             throw new InvalidUpstreamResponseException("Nationalize");
         }
 
-        // Classify age group
         string ageGroup = AgeGroupClassifier.Classify(ageResponse.Age.Value);
 
-        // Create profile
         var profile = new Profile
         {
             Id = Guid.CreateVersion7(),
@@ -108,6 +114,8 @@ public class ProfileService : IProfileService
         await _repository.AddAsync(profile, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);
 
+        await InvalidateReadCachesAsync(cancellationToken);
+
         return new SingleProfileResponse
         {
             Status = "success",
@@ -117,24 +125,32 @@ public class ProfileService : IProfileService
 
     public async Task<SingleProfileResponse> GetProfileByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        var key = CanonicalQueryKey.ForSingle(id);
+        var cached = await _queryCache.GetAsync<SingleProfileResponse>(DetailScope, key, cancellationToken);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
         var profile = await _repository.GetByIdAsync(id, cancellationToken);
         if (profile == null)
         {
             throw new ProfileNotFoundException();
         }
 
-        return new SingleProfileResponse
+        var response = new SingleProfileResponse
         {
             Status = "success",
             Data = MapToProfileDetailResponse(profile)
         };
+        await _queryCache.SetAsync(DetailScope, key, response, DetailTtl, cancellationToken);
+        return response;
     }
 
     public async Task<ProfilesListResponse> GetProfilesAsync(ProfileQueryRequest request, CancellationToken cancellationToken = default)
     {
         var options = _queryValidator.Validate(request);
-        var profiles = await _repository.QueryAsync(options, cancellationToken);
-        return MapToProfilesListResponse(profiles);
+        return await GetByCanonicalAsync(options, cancellationToken);
     }
 
     public async Task<ProfilesListResponse> SearchProfilesAsync(ProfileSearchRequest request, CancellationToken cancellationToken = default)
@@ -149,8 +165,7 @@ public class ProfileService : IProfileService
         parsedOptions.Page = paging.Page;
         parsedOptions.Limit = paging.Limit;
 
-        var profiles = await _repository.QueryAsync(parsedOptions, cancellationToken);
-        return MapToProfilesListResponse(profiles);
+        return await GetByCanonicalAsync(parsedOptions, cancellationToken);
     }
 
     public async Task<IReadOnlyList<ProfileDetailResponse>> ExportProfilesAsync(ProfileQueryRequest request, string? naturalLanguageQuery, CancellationToken cancellationToken = default)
@@ -165,8 +180,17 @@ public class ProfileService : IProfileService
             options = _queryValidator.Validate(request);
         }
 
+        var key = CanonicalQueryKey.ForExport(options);
+        var cached = await _queryCache.GetAsync<CachedExport>(ExportScope, key, cancellationToken);
+        if (cached is not null)
+        {
+            return cached.Items;
+        }
+
         var profiles = await _repository.QueryAllAsync(options, cancellationToken);
-        return profiles.Select(MapToProfileDetailResponse).ToList();
+        var mapped = profiles.Select(MapToProfileDetailResponse).ToList();
+        await _queryCache.SetAsync(ExportScope, key, new CachedExport { Items = mapped }, ExportTtl, cancellationToken);
+        return mapped;
     }
 
     public async Task DeleteProfileAsync(Guid id, CancellationToken cancellationToken = default)
@@ -179,6 +203,31 @@ public class ProfileService : IProfileService
 
         await _repository.DeleteAsync(profile, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);
+
+        await _queryCache.RemoveAsync(DetailScope, CanonicalQueryKey.ForSingle(id), cancellationToken);
+        await InvalidateReadCachesAsync(cancellationToken);
+    }
+
+    public Task InvalidateReadCachesAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.WhenAll(
+            _queryCache.InvalidateScopeAsync(ListScope, cancellationToken),
+            _queryCache.InvalidateScopeAsync(ExportScope, cancellationToken));
+    }
+
+    private async Task<ProfilesListResponse> GetByCanonicalAsync(ProfileQueryOptions options, CancellationToken cancellationToken)
+    {
+        var key = CanonicalQueryKey.ForList(options);
+        var cached = await _queryCache.GetAsync<ProfilesListResponse>(ListScope, key, cancellationToken);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        var profiles = await _repository.QueryAsync(options, cancellationToken);
+        var response = MapToProfilesListResponse(profiles);
+        await _queryCache.SetAsync(ListScope, key, response, ListTtl, cancellationToken);
+        return response;
     }
 
     private static ProfileDetailResponse MapToProfileDetailResponse(Profile profile)
@@ -200,14 +249,20 @@ public class ProfileService : IProfileService
 
     private static ProfilesListResponse MapToProfilesListResponse(PagedResult<Profile> profiles)
     {
+        var totalPages = profiles.Limit <= 0 ? 0 : (int)Math.Ceiling(profiles.Total / (double)profiles.Limit);
         return new ProfilesListResponse
         {
             Status = "success",
             Page = profiles.Page,
             Limit = profiles.Limit,
             Total = profiles.Total,
-            TotalPages = profiles.Limit <= 0 ? 0 : (int)Math.Ceiling(profiles.Total / (double)profiles.Limit),
+            TotalPages = totalPages,
             Data = profiles.Items.Select(MapToProfileDetailResponse).ToList()
         };
+    }
+
+    private sealed class CachedExport
+    {
+        public List<ProfileDetailResponse> Items { get; set; } = new();
     }
 }

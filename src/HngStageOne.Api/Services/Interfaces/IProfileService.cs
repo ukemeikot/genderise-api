@@ -11,4 +11,5 @@ public interface IProfileService
     Task<ProfilesListResponse> SearchProfilesAsync(ProfileSearchRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ProfileDetailResponse>> ExportProfilesAsync(ProfileQueryRequest request, string? naturalLanguageQuery, CancellationToken cancellationToken = default);
     Task DeleteProfileAsync(Guid id, CancellationToken cancellationToken = default);
+    Task InvalidateReadCachesAsync(CancellationToken cancellationToken = default);
 }

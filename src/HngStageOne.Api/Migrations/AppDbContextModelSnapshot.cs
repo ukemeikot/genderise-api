@@ -76,6 +76,18 @@ namespace HngStageOne.Api.Migrations
                     b.HasIndex("Name")
                         .IsUnique();
 
+                    b.HasIndex("CountryId", "Gender", "Age")
+                        .HasDatabaseName("IX_Profiles_Country_Gender_Age");
+
+                    b.HasIndex("Gender", "AgeGroup")
+                        .HasDatabaseName("IX_Profiles_Gender_AgeGroup");
+
+                    b.HasIndex("CountryId", "AgeGroup")
+                        .HasDatabaseName("IX_Profiles_Country_AgeGroup");
+
+                    b.HasIndex("CreatedAt", "Id")
+                        .HasDatabaseName("IX_Profiles_CreatedAt_Id");
+
                     b.ToTable("Profiles");
                 });
 
